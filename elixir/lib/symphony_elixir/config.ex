@@ -67,6 +67,26 @@ defmodule SymphonyElixir.Config do
     |> Schema.resolve_turn_sandbox_policy(workspace)
   end
 
+  @spec agent_backend() :: String.t()
+  def agent_backend do
+    settings!().agent.backend
+  end
+
+  @spec claude_command() :: String.t()
+  def claude_command do
+    settings!().claude.command
+  end
+
+  @spec claude_model() :: String.t() | nil
+  def claude_model do
+    settings!().claude.model
+  end
+
+  @spec claude_allowed_tools() :: [String.t()]
+  def claude_allowed_tools do
+    settings!().claude.allowed_tools
+  end
+
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do
     case Workflow.current() do

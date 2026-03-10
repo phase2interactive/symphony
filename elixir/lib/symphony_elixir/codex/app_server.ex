@@ -3,6 +3,8 @@ defmodule SymphonyElixir.Codex.AppServer do
   Minimal client for the Codex app-server JSON-RPC 2.0 stream over stdio.
   """
 
+  @behaviour SymphonyElixir.AgentBackend
+
   require Logger
   alias SymphonyElixir.{Codex.DynamicTool, Config}
 
@@ -28,13 +30,17 @@ defmodule SymphonyElixir.Codex.AppServer do
   def run(workspace, prompt, issue, opts \\ []) do
     with {:ok, session} <- start_session(workspace) do
       try do
-        run_turn(session, prompt, issue, opts)
+        case run_turn(session, prompt, issue, opts) do
+          {:ok, result, _session} -> {:ok, result}
+          {:error, _} = err -> err
+        end
       after
         stop_session(session)
       end
     end
   end
 
+  @impl true
   @spec start_session(Path.t()) :: {:ok, session()} | {:error, term()}
   def start_session(workspace) do
     with :ok <- validate_workspace_cwd(workspace),
@@ -63,7 +69,8 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  @spec run_turn(session(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
+  @impl true
+  @spec run_turn(session(), String.t(), map(), keyword()) :: {:ok, map(), session()} | {:error, term()}
   def run_turn(
         %{
           port: port,
@@ -73,7 +80,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           turn_sandbox_policy: turn_sandbox_policy,
           thread_id: thread_id,
           workspace: workspace
-        },
+        } = session,
         prompt,
         issue,
         opts \\ []
@@ -111,7 +118,7 @@ defmodule SymphonyElixir.Codex.AppServer do
                session_id: session_id,
                thread_id: thread_id,
                turn_id: turn_id
-             }}
+             }, session}
 
           {:error, reason} ->
             Logger.warning("Codex session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
@@ -136,6 +143,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
+  @impl true
   @spec stop_session(session()) :: :ok
   def stop_session(%{port: port}) when is_port(port) do
     stop_port(port)
