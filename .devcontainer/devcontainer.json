@@ -1,0 +1,41 @@
+{
+  "name": "Symphony",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "JakeBecker.elixir-ls",
+        "phoenixframework.phoenix",
+        "bradlc.vscode-tailwindcss",
+        "ms-playwright.playwright"
+      ],
+      "settings": {
+        "elixirLS.mixEnv": "dev",
+        "elixirLS.fetchDeps": true,
+        "files.associations": {
+          "*.heex": "phoenix-heex"
+        }
+      }
+    }
+  },
+  "forwardPorts": [4000],
+  "portsAttributes": {
+    "4000": {
+      "label": "Phoenix Dashboard",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "cd elixir && mise install && mix setup",
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "MIX_HOME": "/home/vscode/.mix",
+    "HEX_HOME": "/home/vscode/.hex",
+    "ERL_AFLAGS": "-kernel shell_history enabled"
+  }
+}
