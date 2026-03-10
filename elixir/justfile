@@ -1,0 +1,69 @@
+set shell := ["bash", "-uc"]
+export PATH := env_var_or_default("HOME", "/root") + "/.local/share/mise/shims:" + env_var_or_default("PATH", "/usr/bin:/bin")
+
+mix := "mix"
+
+# List available recipes
+default:
+    @just --list
+
+# Install dependencies and set up the project
+setup:
+    {{ mix }} setup
+
+# Fetch dependencies
+deps:
+    {{ mix }} deps.get
+
+# Compile and build the escript binary
+build:
+    {{ mix }} build
+
+# Format source files
+fmt:
+    {{ mix }} format
+
+# Check formatting without modifying files
+fmt-check:
+    {{ mix }} format --check-formatted
+
+# Run Credo linter
+lint:
+    {{ mix }} lint
+
+# Run ExUnit tests
+test *ARGS:
+    {{ mix }} test {{ ARGS }}
+
+# Run tests with coverage report
+coverage:
+    {{ mix }} test --cover
+
+# Run Dialyzer type checks
+dialyzer:
+    {{ mix }} deps.get
+    {{ mix }} dialyzer --format short
+
+# Run the full CI pipeline
+ci: setup build fmt-check lint coverage dialyzer
+
+# Start Symphony with the Phoenix dashboard on a given port (default: 4000)
+run port="4000" workflow="./WORKFLOW.md":
+    ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails --port {{ port }} {{ workflow }}
+
+# Run Playwright E2E tests
+e2e *ARGS:
+    npx playwright test {{ ARGS }}
+
+# Run Playwright E2E tests in headed mode (visible browser)
+e2e-headed *ARGS:
+    npx playwright test --headed {{ ARGS }}
+
+# Open the Playwright UI test runner
+e2e-ui:
+    npx playwright test --ui
+
+# Install Node dependencies and Playwright browsers
+e2e-setup:
+    npm install
+    npx playwright install chromium
