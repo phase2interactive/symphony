@@ -28,7 +28,7 @@ export default defineConfig({
 
   webServer: {
     command:
-      "/home/codespace/.local/bin/mise exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails --port 4001 ./WORKFLOW.md",
+      "mise exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails --port 4001 ./WORKFLOW.md",
     url: "http://localhost:4001",
     timeout: 30_000,
     reuseExistingServer: false,
