@@ -34,7 +34,7 @@ RUN curl https://mise.run | sh \
 # Pre-install Erlang/Elixir via mise (uses the project's mise.toml)
 # This speeds up first container start significantly
 COPY --chown=vscode:vscode elixir/mise.toml /tmp/mise.toml
-RUN cd /tmp && ~/.local/bin/mise install
+RUN cd /tmp && ~/.local/bin/mise trust /tmp/mise.toml && ~/.local/bin/mise install
 
 # Install Node.js for Playwright E2E tests
 RUN ~/.local/bin/mise use --global node@lts
