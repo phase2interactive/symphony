@@ -27,7 +27,7 @@ defmodule SymphonyElixir.GitHub.Client do
 
     with :ok <- check_token(tracker),
          :ok <- check_repo(tracker) do
-      do_fetch_by_labels(tracker.repo, tracker.active_states, tracker.token)
+      do_fetch_by_labels(tracker.repo, tracker.active_states, tracker.token, tracker.active_states)
     end
   end
 
@@ -42,7 +42,7 @@ defmodule SymphonyElixir.GitHub.Client do
 
       with :ok <- check_token(tracker),
            :ok <- check_repo(tracker) do
-        do_fetch_by_labels(tracker.repo, normalized, tracker.token)
+        do_fetch_by_labels(tracker.repo, normalized, tracker.token, tracker.active_states)
       end
     end
   end
@@ -59,7 +59,7 @@ defmodule SymphonyElixir.GitHub.Client do
       with :ok <- check_token(tracker),
            :ok <- check_repo(tracker) do
         Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, acc} ->
-          case fetch_single_issue(tracker.repo, id, tracker.token) do
+          case fetch_single_issue(tracker.repo, id, tracker.token, tracker.active_states) do
             {:ok, issue} -> {:cont, {:ok, [issue | acc]}}
             {:error, reason} -> {:halt, {:error, reason}}
           end
@@ -95,7 +95,7 @@ defmodule SymphonyElixir.GitHub.Client do
 
     with :ok <- check_token(tracker),
          :ok <- check_repo(tracker),
-         {:ok, current_issue} <- fetch_single_issue(tracker.repo, issue_id, tracker.token) do
+         {:ok, current_issue} <- fetch_single_issue(tracker.repo, issue_id, tracker.token, tracker.active_states) do
       if Enum.member?(tracker.terminal_states, state_name) do
         close_issue(tracker.repo, issue_id, current_issue.labels, state_name, tracker)
       else
@@ -137,25 +137,48 @@ defmodule SymphonyElixir.GitHub.Client do
   defp check_repo(%{repo: repo}) when is_binary(repo), do: :ok
   defp check_repo(_tracker), do: {:error, :missing_github_repo}
 
-  defp do_fetch_by_labels(repo, labels, token) do
-    label_param = Enum.join(labels, ",")
-    do_fetch_page(repo, label_param, token, 1, [])
+  # GitHub's `labels` query parameter is AND — it returns only issues with ALL
+  # specified labels. We need issues with ANY active-state label, so we fetch
+  # each label separately and deduplicate by issue number.
+  defp do_fetch_by_labels(repo, labels, token, active_states) do
+    Enum.reduce_while(labels, {:ok, %{}, []}, fn label, {:ok, seen, acc} ->
+      case do_fetch_page(repo, URI.encode(label), token, active_states, 1, []) do
+        {:ok, issues} ->
+          {new_seen, new_issues} =
+            Enum.reduce(issues, {seen, []}, fn issue, {s, a} ->
+              if Map.has_key?(s, issue.id) do
+                {s, a}
+              else
+                {Map.put(s, issue.id, true), [issue | a]}
+              end
+            end)
+
+          {:cont, {:ok, new_seen, acc ++ Enum.reverse(new_issues)}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, _seen, issues} -> {:ok, issues}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
-  defp do_fetch_page(repo, label_param, token, page, acc) do
+  defp do_fetch_page(repo, label_param, token, active_states, page, acc) do
     url =
       "#{@github_api_base}/repos/#{repo}/issues" <>
-        "?state=open&labels=#{URI.encode(label_param)}&per_page=#{@page_size}&page=#{page}"
+        "?state=open&labels=#{label_param}&per_page=#{@page_size}&page=#{page}"
 
     headers = auth_headers(token)
 
     case get_request_fun().(url, headers) do
       {:ok, %{status: 200, body: body}} when is_list(body) ->
-        issues = Enum.flat_map(body, &normalize_issue/1)
+        issues = Enum.flat_map(body, &normalize_issue(&1, active_states))
         updated_acc = acc ++ issues
 
         if length(body) == @page_size do
-          do_fetch_page(repo, label_param, token, page + 1, updated_acc)
+          do_fetch_page(repo, label_param, token, active_states, page + 1, updated_acc)
         else
           {:ok, updated_acc}
         end
@@ -168,13 +191,13 @@ defmodule SymphonyElixir.GitHub.Client do
     end
   end
 
-  defp fetch_single_issue(repo, issue_number, token) do
+  defp fetch_single_issue(repo, issue_number, token, active_states) do
     url = "#{@github_api_base}/repos/#{repo}/issues/#{issue_number}"
     headers = auth_headers(token)
 
     case get_request_fun().(url, headers) do
       {:ok, %{status: 200, body: body}} ->
-        case normalize_issue(body) do
+        case normalize_issue(body, active_states) do
           [issue] -> {:ok, issue}
           [] -> {:error, :issue_not_found}
         end
@@ -220,13 +243,13 @@ defmodule SymphonyElixir.GitHub.Client do
     end
   end
 
-  defp normalize_issue(issue) when is_map(issue) do
+  defp normalize_issue(issue, active_states) when is_map(issue) and is_list(active_states) do
     number = issue["number"]
 
     case number do
       n when is_integer(n) ->
         labels = extract_label_names(issue)
-        state = primary_state_label(labels)
+        state = primary_state_label(labels, active_states)
 
         [
           %Issue{
@@ -251,7 +274,7 @@ defmodule SymphonyElixir.GitHub.Client do
     end
   end
 
-  defp normalize_issue(_), do: []
+  defp normalize_issue(_, _active_states), do: []
 
   defp extract_label_names(%{"labels" => labels}) when is_list(labels) do
     labels
@@ -261,8 +284,11 @@ defmodule SymphonyElixir.GitHub.Client do
 
   defp extract_label_names(_), do: []
 
-  defp primary_state_label([label | _]), do: label
-  defp primary_state_label([]), do: nil
+  defp primary_state_label(labels, active_states) when is_list(labels) and is_list(active_states) do
+    Enum.find(labels, fn label ->
+      Enum.any?(active_states, &(String.downcase(&1) == String.downcase(label)))
+    end)
+  end
 
   defp derive_branch_name(number, title) when is_integer(number) and is_binary(title) do
     slug =

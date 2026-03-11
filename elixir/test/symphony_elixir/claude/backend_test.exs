@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.Claude.BackendTest do
   use SymphonyElixir.TestSupport
 
-  alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.Tracker.Issue
 
   defp test_issue(identifier) do
     %Issue{

@@ -78,11 +78,17 @@ defmodule SymphonyElixir.GitHub.ClientTest do
   test "fetch_candidate_issues returns issues for active_states labels" do
     write_github_workflow!(Workflow.workflow_file_path())
 
+    # Each active-state label is fetched separately (GitHub labels param is AND).
+    # Return the fixture only for the "Todo" label query, empty for others.
     with_get_fun(
       fn url, _headers ->
-        assert url =~ "labels=Todo%2CIn+Progress"
         assert url =~ "/repos/owner/repo/issues"
-        {:ok, %{status: 200, body: [github_issue_fixture()]}}
+
+        if url =~ "labels=Todo" do
+          {:ok, %{status: 200, body: [github_issue_fixture()]}}
+        else
+          {:ok, %{status: 200, body: []}}
+        end
       end,
       fn ->
         assert {:ok, [%Issue{} = issue]} = Client.fetch_candidate_issues()
@@ -96,6 +102,26 @@ defmodule SymphonyElixir.GitHub.ClientTest do
         assert issue.assignee_id == "dev-user"
         assert %DateTime{} = issue.created_at
         assert %DateTime{} = issue.updated_at
+      end
+    )
+  end
+
+  test "fetch_candidate_issues picks active-state label even when not first" do
+    write_github_workflow!(Workflow.workflow_file_path())
+
+    issue_with_extra_labels =
+      github_issue_fixture(%{
+        "labels" => [%{"name" => "bug"}, %{"name" => "enhancement"}, %{"name" => "Todo"}]
+      })
+
+    with_get_fun(
+      fn _url, _headers ->
+        {:ok, %{status: 200, body: [issue_with_extra_labels]}}
+      end,
+      fn ->
+        assert {:ok, [%Issue{} = issue]} = Client.fetch_candidate_issues()
+        assert issue.state == "Todo"
+        assert issue.labels == ["bug", "enhancement", "Todo"]
       end
     )
   end
@@ -119,17 +145,22 @@ defmodule SymphonyElixir.GitHub.ClientTest do
     page1 = Enum.map(1..100, fn n -> github_issue_fixture(%{"number" => n, "title" => "Issue #{n}"}) end)
     page2 = [github_issue_fixture(%{"number" => 101, "title" => "Issue 101"})]
 
+    # Track per-label page counts to test pagination within a single label
     call_count = :counters.new(1, [:atomics])
 
     with_get_fun(
-      fn _url, _headers ->
-        count = :counters.get(call_count, 1) + 1
-        :counters.put(call_count, 1, count)
+      fn url, _headers ->
+        if url =~ "labels=Todo" do
+          count = :counters.get(call_count, 1) + 1
+          :counters.put(call_count, 1, count)
 
-        if count == 1 do
-          {:ok, %{status: 200, body: page1}}
+          if count == 1 do
+            {:ok, %{status: 200, body: page1}}
+          else
+            {:ok, %{status: 200, body: page2}}
+          end
         else
-          {:ok, %{status: 200, body: page2}}
+          {:ok, %{status: 200, body: []}}
         end
       end,
       fn ->
@@ -170,7 +201,7 @@ defmodule SymphonyElixir.GitHub.ClientTest do
 
     with_get_fun(
       fn url, _headers ->
-        assert url =~ "labels=In+Progress"
+        assert url =~ "labels=In"
         {:ok, %{status: 200, body: [github_issue_fixture(%{"labels" => [%{"name" => "In Progress"}]})]}}
       end,
       fn ->
