@@ -1,5 +1,6 @@
 set shell := ["bash", "-uc"]
 export PATH := env_var_or_default("HOME", "/root") + "/.local/share/mise/shims:" + env_var_or_default("PATH", "/usr/bin:/bin")
+export ELIXIR_ERL_OPTIONS := "+fnu"
 
 mix := "mix"
 
@@ -48,8 +49,17 @@ dialyzer:
 ci: setup build fmt-check lint coverage dialyzer
 
 # Start Symphony with the Phoenix dashboard on a given port (default: 4000)
-run port="4000" workflow="./WORKFLOW.md":
-    ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails --port {{ port }} {{ workflow }}
+run port="4000" host="0.0.0.0" workflow="./WORKFLOW.md":
+    if ss -tlnp | grep -q ':{{ port }} '; then \
+        echo "WARNING: port {{ port }} is already in use. Attempting to free it..."; \
+        fuser -k {{ port }}/tcp 2>/dev/null || lsof -ti:{{ port }} | xargs kill 2>/dev/null || true; \
+        sleep 1; \
+        if ss -tlnp | grep -q ':{{ port }} '; then \
+            echo "ERROR: could not free port {{ port }}. Kill the process manually."; \
+            exit 1; \
+        fi; \
+    fi
+    ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails --port {{ port }} --host {{ host }} {{ workflow }}
 
 # Run Playwright E2E tests
 e2e *ARGS:

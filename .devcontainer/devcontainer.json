@@ -24,6 +24,7 @@
       }
     }
   },
+  "runArgs": ["-p", "4000:4000"],
   "forwardPorts": [4000],
   "portsAttributes": {
     "4000": {
@@ -36,6 +37,7 @@
   "containerEnv": {
     "MIX_HOME": "/home/vscode/.mix",
     "HEX_HOME": "/home/vscode/.hex",
-    "ERL_AFLAGS": "-kernel shell_history enabled"
+    "ERL_AFLAGS": "-kernel shell_history enabled",
+    "ELIXIR_ERL_OPTIONS": "+fnu"
   }
 }

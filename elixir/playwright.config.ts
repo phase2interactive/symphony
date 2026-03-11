@@ -30,8 +30,8 @@ export default defineConfig({
     command:
       "mise exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails --port 4001 ./WORKFLOW.md",
     url: "http://localhost:4001",
-    timeout: 30_000,
-    reuseExistingServer: false,
+    timeout: 60_000,
+    reuseExistingServer: !process.env.CI,
     stdout: "pipe",
     stderr: "pipe",
     env: {
