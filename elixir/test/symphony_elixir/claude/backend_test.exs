@@ -222,6 +222,97 @@ defmodule SymphonyElixir.Claude.BackendTest do
     end
   end
 
+  test "run_turn succeeds when CLI outputs final result without trailing newline" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-claude-noeol-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "CL-5")
+      claude_binary = Path.join(test_root, "fake-claude")
+      File.mkdir_p!(workspace)
+
+      # Use printf '%s' (no trailing newline) for the final result line
+      File.write!(claude_binary, """
+      #!/bin/sh
+      printf '%s\\n' '{"type":"system","subtype":"init","session_id":"sess-noeol-1","cwd":"'$(pwd)'"}'
+      printf '%s' '{"type":"result","subtype":"success","result":"Done","session_id":"sess-noeol-1","cost_usd":0.001,"duration_ms":500,"num_turns":1}'
+      exit 0
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        agent_backend: "claude",
+        claude_command: claude_binary
+      )
+
+      issue = test_issue("CL-5")
+      test_pid = self()
+      on_message = fn msg -> send(test_pid, {:claude_message, msg}) end
+
+      {:ok, session} = ClaudeBackend.start_session(workspace)
+
+      assert {:ok, result, updated_session} =
+               ClaudeBackend.run_turn(session, "Do the task", issue, on_message: on_message)
+
+      assert result[:session_id] == "sess-noeol-1"
+      assert updated_session.session_id == "sess-noeol-1"
+      assert_received {:claude_message, %{event: :turn_completed}}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "run_turn returns port_exit error with exit code when CLI exits non-zero without trailing newline" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-claude-noeol-exit1-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "CL-6")
+      claude_binary = Path.join(test_root, "fake-claude")
+      File.mkdir_p!(workspace)
+
+      # CLI outputs error result without trailing newline, then exits with code 1
+      File.write!(claude_binary, """
+      #!/bin/sh
+      printf '%s\\n' '{"type":"system","subtype":"init","session_id":"sess-exit1","cwd":"'$(pwd)'"}'
+      printf '%s' '{"type":"result","subtype":"error_during_execution","error":"something went wrong","session_id":"sess-exit1"}'
+      exit 1
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        agent_backend: "claude",
+        claude_command: claude_binary
+      )
+
+      issue = test_issue("CL-6")
+      test_pid = self()
+      on_message = fn msg -> send(test_pid, {:claude_message, msg}) end
+
+      {:ok, session} = ClaudeBackend.start_session(workspace)
+
+      assert {:error, {:turn_failed, payload}} =
+               ClaudeBackend.run_turn(session, "Do the task", issue, on_message: on_message)
+
+      assert payload["subtype"] == "error_during_execution"
+      assert_received {:claude_message, %{event: :turn_failed}}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "stop_session is a no-op and always returns :ok" do
     session = %{session_id: "sess-noop", workspace: "/tmp/fake", metadata: %{}}
     assert :ok = ClaudeBackend.stop_session(session)

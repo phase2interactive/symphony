@@ -162,14 +162,44 @@ defmodule SymphonyElixir.Claude.Backend do
       {^port, {:data, {:noeol, chunk}}} ->
         receive_loop(port, on_message, timeout_ms, pending_line <> to_string(chunk), session_id, metadata)
 
-      {^port, {:exit_status, 0}} ->
-        {:error, :port_exit_before_result}
-
       {^port, {:exit_status, status}} ->
-        {:error, {:port_exit, status}}
+        handle_exit_status(pending_line, status, port, on_message, timeout_ms, session_id, metadata)
     after
       timeout_ms ->
         {:error, :turn_timeout}
+    end
+  end
+
+  defp handle_exit_status(pending_line, status, port, on_message, timeout_ms, session_id, metadata) do
+    # After exit_status, drain any remaining data messages from the mailbox.
+    # Erlang ports may deliver {:noeol, data} AFTER {:exit_status, _}.
+    final_line = drain_pending_data(port, pending_line)
+    trimmed = String.trim(final_line)
+
+    if trimmed != "" do
+      case handle_line(port, on_message, trimmed, timeout_ms, session_id, metadata) do
+        {:ok, _result, _captured_id} = success -> success
+        {:error, _reason} = error -> error
+      end
+    else
+      case status do
+        0 -> {:error, :port_exit_before_result}
+        _ -> {:error, {:port_exit, status}}
+      end
+    end
+  end
+
+  defp drain_pending_data(port, pending_line) do
+    receive do
+      {^port, {:data, {:eol, chunk}}} ->
+        # Complete line found; return it for processing (ignore further draining)
+        pending_line <> to_string(chunk)
+
+      {^port, {:data, {:noeol, chunk}}} ->
+        drain_pending_data(port, pending_line <> to_string(chunk))
+    after
+      100 ->
+        pending_line
     end
   end
 

@@ -9,7 +9,8 @@ defmodule SymphonyElixir.GitHub.ClientTest do
   # ---------------------------------------------------------------------------
 
   defp write_github_workflow!(path, overrides \\ []) do
-    write_workflow_file!(path,
+    write_workflow_file!(
+      path,
       Keyword.merge(
         [
           tracker_kind: "github",

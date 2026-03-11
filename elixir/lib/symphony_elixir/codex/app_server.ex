@@ -312,7 +312,16 @@ defmodule SymphonyElixir.Codex.AppServer do
         )
 
       {^port, {:exit_status, status}} ->
-        {:error, {:port_exit, status}}
+        # Drain any remaining data after exit_status (Erlang ports may deliver
+        # {:noeol, data} AFTER {:exit_status, _}).
+        final_line = drain_pending_data(port, pending_line)
+        trimmed = String.trim(final_line)
+
+        if trimmed != "" do
+          handle_incoming(port, on_message, trimmed, timeout_ms, tool_executor, auto_approve_requests)
+        else
+          {:error, {:port_exit, status}}
+        end
     after
       timeout_ms ->
         {:error, :turn_timeout}
@@ -848,7 +857,14 @@ defmodule SymphonyElixir.Codex.AppServer do
         with_timeout_response(port, request_id, timeout_ms, pending_line <> to_string(chunk))
 
       {^port, {:exit_status, status}} ->
-        {:error, {:port_exit, status}}
+        final_line = drain_pending_data(port, pending_line)
+        trimmed = String.trim(final_line)
+
+        if trimmed != "" do
+          handle_response(port, request_id, trimmed, timeout_ms)
+        else
+          {:error, {:port_exit, status}}
+        end
     after
       timeout_ms ->
         {:error, :response_timeout}
@@ -896,6 +912,19 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   defp issue_context(%{id: issue_id, identifier: identifier}) do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"
+  end
+
+  defp drain_pending_data(port, pending_line) do
+    receive do
+      {^port, {:data, {:eol, chunk}}} ->
+        pending_line <> to_string(chunk)
+
+      {^port, {:data, {:noeol, chunk}}} ->
+        drain_pending_data(port, pending_line <> to_string(chunk))
+    after
+      100 ->
+        pending_line
+    end
   end
 
   defp stop_port(port) when is_port(port) do
