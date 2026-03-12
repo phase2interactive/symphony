@@ -1,4 +1,5 @@
 set shell := ["bash", "-uc"]
+set dotenv-load
 export PATH := env_var_or_default("HOME", "/root") + "/.local/share/mise/shims:" + env_var_or_default("PATH", "/usr/bin:/bin")
 export ELIXIR_ERL_OPTIONS := "+fnu"
 

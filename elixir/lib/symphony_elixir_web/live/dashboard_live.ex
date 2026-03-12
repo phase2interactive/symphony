@@ -78,6 +78,16 @@ defmodule SymphonyElixirWeb.DashboardLive do
           </p>
         </section>
       <% else %>
+        <%= if @payload[:last_poll_error] do %>
+          <section class="section-card" style="border-left: 4px solid #e53e3e; background: #fff5f5;">
+            <div class="section-header">
+              <div>
+                <h2 class="section-title" style="color: #c53030;">Polling error</h2>
+                <p class="section-copy"><%= @payload.last_poll_error %></p>
+              </div>
+            </div>
+          </section>
+        <% end %>
         <section class="metric-grid">
           <article class="metric-card">
             <p class="metric-label">Running</p>

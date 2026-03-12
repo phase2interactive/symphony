@@ -36,7 +36,8 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       retry_attempts: %{},
       codex_totals: nil,
-      codex_rate_limits: nil
+      codex_rate_limits: nil,
+      last_poll_error: nil
     ]
   end
 
@@ -177,48 +178,15 @@ defmodule SymphonyElixir.Orchestrator do
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          true <- available_slots(state) > 0 do
-      choose_issues(issues, state)
+      choose_issues(issues, %{state | last_poll_error: nil})
     else
-      {:error, :missing_linear_api_token} ->
-        Logger.error("Linear API token missing in WORKFLOW.md")
-        state
-
-      {:error, :missing_linear_project_slug} ->
-        Logger.error("Linear project slug missing in WORKFLOW.md")
-        state
-
-      {:error, :missing_tracker_kind} ->
-        Logger.error("Tracker kind missing in WORKFLOW.md")
-
-        state
-
-      {:error, {:unsupported_tracker_kind, kind}} ->
-        Logger.error("Unsupported tracker kind in WORKFLOW.md: #{inspect(kind)}")
-
-        state
-
-      {:error, {:invalid_workflow_config, message}} ->
-        Logger.error("Invalid WORKFLOW.md config: #{message}")
-        state
-
-      {:error, {:missing_workflow_file, path, reason}} ->
-        Logger.error("Missing WORKFLOW.md at #{path}: #{inspect(reason)}")
-        state
-
-      {:error, :workflow_front_matter_not_a_map} ->
-        Logger.error("Failed to parse WORKFLOW.md: workflow front matter must decode to a map")
-        state
-
-      {:error, {:workflow_parse_error, reason}} ->
-        Logger.error("Failed to parse WORKFLOW.md: #{inspect(reason)}")
-        state
-
       {:error, reason} ->
-        Logger.error("Failed to fetch from Linear: #{inspect(reason)}")
-        state
+        message = format_dispatch_error(reason)
+        Logger.error(message)
+        %{state | last_poll_error: message}
 
       false ->
-        state
+        %{state | last_poll_error: nil}
     end
   end
 
@@ -948,6 +916,7 @@ defmodule SymphonyElixir.Orchestrator do
        retrying: retrying,
        codex_totals: state.codex_totals,
        rate_limits: Map.get(state, :codex_rate_limits),
+       last_poll_error: state.last_poll_error,
        polling: %{
          checking?: state.poll_check_in_progress == true,
          next_poll_in_ms: next_poll_in_ms(state.next_poll_due_at_ms, now_ms),
@@ -1056,6 +1025,22 @@ defmodule SymphonyElixir.Orchestrator do
   defp schedule_poll_cycle_start do
     :timer.send_after(@poll_transition_render_delay_ms, self(), :run_poll_cycle)
     :ok
+  end
+
+  defp format_dispatch_error(reason) do
+    case reason do
+      :missing_linear_api_token -> "Linear API token missing in WORKFLOW.md"
+      :missing_linear_project_slug -> "Linear project slug missing in WORKFLOW.md"
+      :missing_github_token -> "GitHub token missing — set SYMPHONY_GITHUB_TOKEN in your environment or .env file"
+      :missing_github_repo -> "GitHub repo missing in WORKFLOW.md (tracker.repo)"
+      :missing_tracker_kind -> "Tracker kind missing in WORKFLOW.md"
+      {:unsupported_tracker_kind, kind} -> "Unsupported tracker kind in WORKFLOW.md: #{inspect(kind)}"
+      {:invalid_workflow_config, message} -> "Invalid WORKFLOW.md config: #{message}"
+      {:missing_workflow_file, path, reason} -> "Missing WORKFLOW.md at #{path}: #{inspect(reason)}"
+      :workflow_front_matter_not_a_map -> "Failed to parse WORKFLOW.md: front matter must decode to a map"
+      {:workflow_parse_error, reason} -> "Failed to parse WORKFLOW.md: #{inspect(reason)}"
+      other -> "Failed to fetch issues: #{inspect(other)}"
+    end
   end
 
   defp next_poll_in_ms(nil, _now_ms), do: nil

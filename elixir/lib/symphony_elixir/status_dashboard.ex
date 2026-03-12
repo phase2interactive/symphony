@@ -317,7 +317,8 @@ defmodule SymphonyElixir.StatusDashboard do
              retrying: retrying,
              codex_totals: codex_totals,
              rate_limits: Map.get(snapshot, :rate_limits),
-             polling: Map.get(snapshot, :polling)
+             polling: Map.get(snapshot, :polling),
+             last_poll_error: Map.get(snapshot, :last_poll_error)
            }},
           update_token_samples(token_samples, now_ms, total_tokens)
         }
@@ -334,6 +335,7 @@ defmodule SymphonyElixir.StatusDashboard do
     case snapshot_data do
       {:ok, %{running: running, retrying: retrying, codex_totals: codex_totals} = snapshot} ->
         rate_limits = Map.get(snapshot, :rate_limits)
+        last_poll_error = Map.get(snapshot, :last_poll_error)
         project_link_lines = format_project_link_lines()
         project_refresh_line = format_project_refresh_line(Map.get(snapshot, :polling))
         codex_input_tokens = Map.get(codex_totals, :input_tokens, 0)
@@ -346,6 +348,13 @@ defmodule SymphonyElixir.StatusDashboard do
         running_rows = format_running_rows(running, running_event_width)
         running_to_backoff_spacer = if(running == [], do: [], else: ["│"])
         backoff_rows = format_retry_rows(retrying)
+
+        poll_error_line =
+          if last_poll_error do
+            [colorize("│ ⚠ Error: ", @ansi_bold) <> colorize(last_poll_error, @ansi_red)]
+          else
+            []
+          end
 
         ([
            colorize("╭─ SYMPHONY STATUS", @ansi_bold),
@@ -363,6 +372,7 @@ defmodule SymphonyElixir.StatusDashboard do
              colorize(" | ", @ansi_gray) <>
              colorize("total #{format_count(codex_total_tokens)}", @ansi_yellow),
            colorize("│ Rate Limits: ", @ansi_bold) <> format_rate_limits(rate_limits),
+           poll_error_line,
            project_link_lines,
            project_refresh_line,
            colorize("├─ Running", @ansi_bold),

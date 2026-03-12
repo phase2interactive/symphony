@@ -1599,4 +1599,74 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     end)
     |> elem(1)
   end
+
+  test "snapshot surfaces last_poll_error when config validation fails" do
+    orchestrator_name = Module.concat(__MODULE__, :PollErrorOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :normal)
+    end)
+
+    # Configure GitHub tracker with missing token to trigger validation error.
+    # Temporarily unset the env var so the fallback resolution also returns nil.
+    prev = System.get_env("SYMPHONY_GITHUB_TOKEN")
+    System.delete_env("SYMPHONY_GITHUB_TOKEN")
+
+    on_exit(fn -> restore_env("SYMPHONY_GITHUB_TOKEN", prev) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_token: nil,
+      tracker_repo: "owner/repo"
+    )
+
+    # Trigger a poll cycle
+    send(pid, :tick)
+    Process.sleep(100)
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert is_binary(snapshot.last_poll_error)
+    assert snapshot.last_poll_error =~ "GitHub token missing"
+  end
+
+  test "snapshot clears last_poll_error after successful poll" do
+    orchestrator_name = Module.concat(__MODULE__, :PollErrorClearOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :normal)
+    end)
+
+    # Set up error state first
+    prev = System.get_env("SYMPHONY_GITHUB_TOKEN")
+    System.delete_env("SYMPHONY_GITHUB_TOKEN")
+
+    on_exit(fn -> restore_env("SYMPHONY_GITHUB_TOKEN", prev) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_token: nil,
+      tracker_repo: "owner/repo"
+    )
+
+    send(pid, :tick)
+    Process.sleep(100)
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert is_binary(snapshot.last_poll_error)
+
+    # Now switch to memory tracker (always succeeds) to clear the error
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory"
+    )
+
+    send(pid, :tick)
+    Process.sleep(100)
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert is_nil(snapshot.last_poll_error)
+  end
 end
